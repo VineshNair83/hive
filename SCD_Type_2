@@ -1,0 +1,48 @@
+--This is a demonstation of SCD Type 2 implementation in Hive
+
+--Below are the tables required. CUST_DIM is the target table
+
+--CUST_STG_TXT
+--CUST_STG
+--CUST_DIM_TEMP
+--CUST_DIM
+
+
+use vinesh;
+
+-- Move from stage_text to stage_orc
+insert overwrite table cust_stg select id, name, salary from cust_stg_txt;
+
+
+-- Union all the above and insert into cust_dim_temp table
+-- get all old end dated record
+insert overwrite table cust_dim_temp
+select id, name, salary, start_dt, end_dt, last_updt_dt from cust_dim where end_dt is not null
+UNION ALL
+-- get all unchanged records
+select d.id, d.name, d.salary, d.start_dt, d.end_dt, d.last_updt_dt from cust_dim d
+left join cust_stg s on s.id = d.id and d.end_dt is null
+where s.salary = d.salary
+UNION ALL
+-- for new records insert new records
+select s.id, s.name, s.salary, current_timestamp start_dt, null as end_dt, current_timestamp as last_updt_ts from cust_stg s
+left join cust_dim d on d.id = s.id and d.end_dt is null
+where d.id is null
+UNION ALL
+--for updated records insert new records
+select s.id, s.name, s.salary, current_timestamp start_dt, null as end_dt, current_timestamp as last_updt_ts from cust_stg s
+inner join cust_dim d on d.id = s.id and d.end_dt is null
+where d.salary != s.salary
+UNION ALL
+-- for updated records, create end dated records
+select d.id, d.name, d.salary, d.start_dt, current_timestamp as end_dt, current_timestamp as last_updt_ts from cust_stg s
+inner join cust_dim d on d.id = s.id and d.end_dt is null
+where d.salary != s.salary;
+
+
+-- Delete files for dim able
+truncate table cust_dim;
+
+
+-- Move files from dim_temp table to dim table
+dfs -cp /apps/hive/warehouse/vinesh.db/cust_dim_temp/* /apps/hive/warehouse/vinesh.db/cust_dim/;
